@@ -1,5 +1,5 @@
 {
-  "pluginAlias": "2NIntercom",
+  "pluginAlias": "2NIPForce",
   "pluginType": "platform",
   "singular": true,
   "headerDisplay": "Homebridge plugin for 2N IP intercoms. Control doorbell notifications, door lock, and camera via HomeKit.",

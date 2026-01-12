@@ -1,6 +1,6 @@
 {
-  "name": "homebridge-2n-intercom",
-  "displayName": "2N Intercom",
+  "name": "homebridge-2n-ip-force",
+  "displayName": "2N IP Force",
   "version": "1.0.0",
   "description": "Homebridge plugin for 2N IP intercoms with doorbell, lock, and camera support",
   "main": "dist/index.js",

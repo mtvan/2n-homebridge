@@ -1,12 +1,12 @@
 /**
  * Platform name - used to register the plugin with Homebridge
  */
-export const PLATFORM_NAME = '2NIntercom';
+export const PLATFORM_NAME = '2NIPForce';
 
 /**
  * Plugin name - must match the name in package.json
  */
-export const PLUGIN_NAME = 'homebridge-2n-intercom';
+export const PLUGIN_NAME = 'homebridge-2n-ip-force';
 
 /**
  * Default HTTP port for 2N API
