@@ -2,8 +2,6 @@ import {
   Service,
   PlatformAccessory,
   CharacteristicValue,
-  DoorbellController,
-  CameraController,
 } from 'homebridge';
 
 import { Intercom2NPlatform } from './platform';
@@ -24,10 +22,10 @@ import {
  * Exposes the 2N intercom as a Doorbell with Lock in HomeKit.
  */
 export class Intercom2NAccessory {
+  private doorbellService: Service;
   private lockService: Service;
   private client: Api2NClient;
   private cameraSource?: CameraSource;
-  private doorbellController?: DoorbellController | CameraController;
 
   // State
   private lockCurrentState: number;
@@ -68,17 +66,35 @@ export class Intercom2NAccessory {
       .setCharacteristic(this.platform.Characteristic.Model, 'IP Intercom')
       .setCharacteristic(this.platform.Characteristic.SerialNumber, context.host);
 
-    // Set up the DoorbellController with camera - this handles the doorbell service automatically
-    this.setupDoorbellWithCamera();
+    // Create the Doorbell service FIRST (as primary service)
+    // Use a subtype to ensure unique UUID
+    this.doorbellService = this.accessory.getService(this.platform.Service.Doorbell)
+      || this.accessory.addService(this.platform.Service.Doorbell, 'Doorbell', 'doorbell');
 
-    // Get or create the Lock Mechanism service
+    this.doorbellService.setPrimaryService(true);
+    this.doorbellService.setCharacteristic(
+      this.platform.Characteristic.Name,
+      this.platform.config.name || '2N Intercom',
+    );
+
+    this.platform.log.info('[Accessory] Doorbell service created');
+
+    // Set up camera streaming (using CameraController, not DoorbellController)
+    this.setupCamera();
+
+    // Get or create the Lock Mechanism service with subtype
     this.lockService = this.accessory.getService(this.platform.Service.LockMechanism)
-      || this.accessory.addService(this.platform.Service.LockMechanism);
+      || this.accessory.addService(this.platform.Service.LockMechanism, 'Door Lock', 'lock');
 
     this.lockService.setCharacteristic(
       this.platform.Characteristic.Name,
       'Door Lock',
     );
+
+    // Link lock to doorbell
+    this.doorbellService.addLinkedService(this.lockService);
+
+    this.platform.log.info('[Accessory] Lock service created and linked to doorbell');
 
     // Register handlers for Lock characteristics
     this.lockService.getCharacteristic(this.platform.Characteristic.LockCurrentState)
@@ -93,14 +109,13 @@ export class Intercom2NAccessory {
   }
 
   /**
-   * Set up DoorbellController with camera streaming
-   * DoorbellController extends CameraController and adds doorbell-specific functionality
+   * Set up camera streaming with CameraController
    */
-  private setupDoorbellWithCamera(): void {
+  private setupCamera(): void {
     const context = this.accessory.context;
 
     try {
-      this.platform.log.info('[Accessory] Setting up DoorbellController with camera...');
+      this.platform.log.info('[Accessory] Setting up camera...');
 
       // Determine RTSP URL
       const rtspUrl = context.rtspUrl || this.client.getRtspUrl();
@@ -115,72 +130,55 @@ export class Intercom2NAccessory {
         context.videoCodec || 'libx264',
       );
 
-      // Common streaming options
-      const streamingOptions = {
-        supportedCryptoSuites: [
-          this.platform.api.hap.SRTPCryptoSuites.AES_CM_128_HMAC_SHA1_80,
-        ],
-        video: {
-          resolutions: [
-            [1920, 1080, 30],
-            [1280, 720, 30],
-            [640, 480, 30],
-            [640, 360, 30],
-            [480, 360, 30],
-            [480, 270, 30],
-            [320, 240, 30],
-            [320, 240, 15],
-            [320, 180, 30],
-          ] as [number, number, number][],
-          codec: {
-            profiles: [
-              this.platform.api.hap.H264Profile.BASELINE,
-              this.platform.api.hap.H264Profile.MAIN,
-              this.platform.api.hap.H264Profile.HIGH,
+      // Configure the camera streaming delegate
+      const cameraController = new this.platform.api.hap.CameraController({
+        cameraStreamCount: 2,
+        delegate: this.cameraSource,
+        streamingOptions: {
+          supportedCryptoSuites: [
+            this.platform.api.hap.SRTPCryptoSuites.AES_CM_128_HMAC_SHA1_80,
+          ],
+          video: {
+            resolutions: [
+              [1920, 1080, 30],
+              [1280, 720, 30],
+              [640, 480, 30],
+              [640, 360, 30],
+              [480, 360, 30],
+              [480, 270, 30],
+              [320, 240, 30],
+              [320, 240, 15],
+              [320, 180, 30],
             ],
-            levels: [
-              this.platform.api.hap.H264Level.LEVEL3_1,
-              this.platform.api.hap.H264Level.LEVEL3_2,
-              this.platform.api.hap.H264Level.LEVEL4_0,
+            codec: {
+              profiles: [
+                this.platform.api.hap.H264Profile.BASELINE,
+                this.platform.api.hap.H264Profile.MAIN,
+                this.platform.api.hap.H264Profile.HIGH,
+              ],
+              levels: [
+                this.platform.api.hap.H264Level.LEVEL3_1,
+                this.platform.api.hap.H264Level.LEVEL3_2,
+                this.platform.api.hap.H264Level.LEVEL4_0,
+              ],
+            },
+          },
+          audio: {
+            twoWayAudio: false,
+            codecs: [
+              {
+                type: this.platform.api.hap.AudioStreamingCodecType.AAC_ELD,
+                samplerate: this.platform.api.hap.AudioStreamingSamplerate.KHZ_16,
+              },
             ],
           },
         },
-        audio: {
-          twoWayAudio: false,
-          codecs: [
-            {
-              type: this.platform.api.hap.AudioStreamingCodecType.AAC_ELD,
-              samplerate: this.platform.api.hap.AudioStreamingSamplerate.KHZ_16,
-            },
-          ],
-        },
-      };
+      });
 
-      // Try to use DoorbellController if available, fall back to CameraController
-      // DoorbellController provides ringDoorbell() method and proper doorbell integration
-      const DoorbellCtrl = this.platform.api.hap.DoorbellController;
-
-      if (DoorbellCtrl) {
-        this.platform.log.info('[Accessory] Using DoorbellController for proper doorbell integration');
-        this.doorbellController = new DoorbellCtrl({
-          cameraStreamCount: 2,
-          delegate: this.cameraSource,
-          streamingOptions: streamingOptions,
-        });
-      } else {
-        // Fallback to CameraController if DoorbellController not available
-        this.platform.log.warn('[Accessory] DoorbellController not available, falling back to CameraController');
-        this.doorbellController = new this.platform.api.hap.CameraController({
-          cameraStreamCount: 2,
-          delegate: this.cameraSource,
-          streamingOptions: streamingOptions,
-        });
-      }
-
-      this.accessory.configureController(this.doorbellController);
-      this.platform.log.info('[Accessory] DoorbellController configured successfully');
+      this.accessory.configureController(cameraController);
+      this.platform.log.info('[Accessory] Camera configured successfully');
     } catch (err) {
-      this.platform.log.error('[Accessory] Failed to set up DoorbellController: %s', (err as Error).message);
+      this.platform.log.error('[Accessory] Failed to set up camera: %s', (err as Error).message);
     }
   }
 
@@ -314,23 +312,11 @@ export class Intercom2NAccessory {
   private triggerDoorbell(): void {
     this.platform.log.info('[Accessory] Triggering doorbell notification');
 
-    // Use DoorbellController's ringDoorbell() method if available
-    if (this.doorbellController && 'ringDoorbell' in this.doorbellController) {
-      this.platform.log.info('[Accessory] Using DoorbellController.ringDoorbell()');
-      (this.doorbellController as DoorbellController).ringDoorbell();
-    } else {
-      // Fallback: Find and update the doorbell service characteristic directly
-      this.platform.log.info('[Accessory] Using direct characteristic update');
-      const doorbellService = this.accessory.getService(this.platform.Service.Doorbell);
-      if (doorbellService) {
-        doorbellService.updateCharacteristic(
-          this.platform.Characteristic.ProgrammableSwitchEvent,
-          this.platform.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS,
-        );
-      } else {
-        this.platform.log.warn('[Accessory] No doorbell service found to trigger');
-      }
-    }
+    // Update the ProgrammableSwitchEvent characteristic on the doorbell service
+    this.doorbellService.updateCharacteristic(
+      this.platform.Characteristic.ProgrammableSwitchEvent,
+      this.platform.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS,
+    );
   }
 
   /**
