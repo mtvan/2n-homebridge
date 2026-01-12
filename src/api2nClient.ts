@@ -61,6 +61,39 @@ export class Api2NClient extends EventEmitter {
     }
 
     this.log.info('[Api2NClient] Initialized for %s://%s:%d', useHttps ? 'https' : 'http', host, port);
+
+    // Immediately discover Digest auth challenge
+    this.discoverDigestAuth();
+  }
+
+  /**
+   * Discover Digest auth challenge by making an unauthenticated request
+   */
+  private async discoverDigestAuth(): Promise<void> {
+    try {
+      const options: http.RequestOptions = {
+        hostname: this.host,
+        port: this.port,
+        path: '/api/system/info',
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        },
+      };
+
+      const response = await this.makeRequest(options);
+
+      if (response.statusCode === 401 && response.headers['www-authenticate']) {
+        const challenge = this.parseDigestChallenge(response.headers['www-authenticate'] as string);
+        if (challenge) {
+          this.lastDigestChallenge = challenge;
+          this.nonceCount = 0;
+          this.log.info('[Api2NClient] Discovered Digest auth challenge');
+        }
+      }
+    } catch (err) {
+      this.log.debug('[Api2NClient] Digest discovery failed: %s', (err as Error).message);
+    }
   }
 
   /**
@@ -267,6 +300,26 @@ export class Api2NClient extends EventEmitter {
         const apiResponse = JSON.parse(response.data as string) as ApiResponse<T>;
         if (!apiResponse.success) {
           this.log.warn('[Api2NClient] API returned success=false: %j', apiResponse);
+
+          // Error code 8 means we need Digest auth - force re-discovery
+          if (apiResponse.error?.code === 8 && !this.lastDigestChallenge) {
+            this.log.info('[Api2NClient] Error 8 detected, forcing Digest auth discovery...');
+            await this.discoverDigestAuth();
+            if (this.lastDigestChallenge) {
+              // Retry with Digest auth
+              options.headers = {
+                ...options.headers,
+                'Authorization': this.generateDigestAuth('GET', path, this.lastDigestChallenge),
+              };
+              const retryResponse = await this.makeRequest(options);
+              if (retryResponse.statusCode === 200) {
+                const retryApiResponse = JSON.parse(retryResponse.data as string) as ApiResponse<T>;
+                if (retryApiResponse.success) {
+                  return retryApiResponse;
+                }
+              }
+            }
+          }
         }
         return apiResponse;
       } catch (err) {
