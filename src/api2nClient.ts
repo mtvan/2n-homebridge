@@ -87,8 +87,8 @@ export class Api2NClient extends EventEmitter {
         });
 
         res.on('end', () => {
-          this.log.debug('[Api2NClient] Response status: %d', res.statusCode);
-          this.log.debug('[Api2NClient] Response body: %s', data.substring(0, 500));
+          this.log.info('[Api2NClient] Response status: %d', res.statusCode);
+          this.log.info('[Api2NClient] Response body: %s', data.substring(0, 500));
 
           if (res.statusCode === 401) {
             reject(new Error('Authentication failed - check username/password'));
@@ -96,14 +96,18 @@ export class Api2NClient extends EventEmitter {
           }
 
           if (res.statusCode !== 200) {
-            reject(new Error(`HTTP error: ${res.statusCode}`));
+            reject(new Error(`HTTP error: ${res.statusCode} - ${data.substring(0, 200)}`));
             return;
           }
 
           try {
             const response = JSON.parse(data) as ApiResponse<T>;
+            if (!response.success) {
+              this.log.warn('[Api2NClient] API returned success=false: %j', response);
+            }
             resolve(response);
           } catch (err) {
+            this.log.error('[Api2NClient] Failed to parse JSON: %s', data.substring(0, 500));
             reject(new Error(`Failed to parse response: ${err}`));
           }
         });
@@ -155,7 +159,7 @@ export class Api2NClient extends EventEmitter {
     );
 
     if (!response.success || !response.result) {
-      throw new Error(`Failed to get switch status: ${response.error?.message || 'Unknown error'}`);
+      throw new Error(`Failed to get switch status: ${response.error?.message || JSON.stringify(response)}`);
     }
 
     const switchStatus = response.result.switches?.find(s => s.switch === switchId);
@@ -208,7 +212,7 @@ export class Api2NClient extends EventEmitter {
     );
 
     if (!response.success || !response.result) {
-      throw new Error(`Failed to subscribe to events: ${response.error?.message || 'Unknown error'}`);
+      throw new Error(`Failed to subscribe to events: ${response.error?.message || JSON.stringify(response)}`);
     }
 
     this.subscriptionId = response.result.id;
