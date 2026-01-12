@@ -2,6 +2,7 @@ import {
   Service,
   PlatformAccessory,
   CharacteristicValue,
+  DoorbellController,
 } from 'homebridge';
 
 import { Intercom2NPlatform } from './platform';
@@ -22,7 +23,7 @@ import {
  * Exposes the 2N intercom as a Doorbell with Lock in HomeKit.
  */
 export class Intercom2NAccessory {
-  private doorbellService: Service;
+  private doorbellController?: DoorbellController;
   private lockService: Service;
   private client: Api2NClient;
   private cameraSource?: CameraSource;
@@ -66,22 +67,6 @@ export class Intercom2NAccessory {
       .setCharacteristic(this.platform.Characteristic.Model, 'IP Intercom')
       .setCharacteristic(this.platform.Characteristic.SerialNumber, context.host);
 
-    // Create the Doorbell service FIRST (as primary service)
-    // Use a subtype to ensure unique UUID
-    this.doorbellService = this.accessory.getService(this.platform.Service.Doorbell)
-      || this.accessory.addService(this.platform.Service.Doorbell, 'Doorbell', 'doorbell');
-
-    this.doorbellService.setPrimaryService(true);
-    this.doorbellService.setCharacteristic(
-      this.platform.Characteristic.Name,
-      this.platform.config.name || '2N Intercom',
-    );
-
-    this.platform.log.info('[Accessory] Doorbell service created');
-
-    // Set up camera streaming (using CameraController, not DoorbellController)
-    this.setupCamera();
-
     // Get or create the Lock Mechanism service with subtype
     this.lockService = this.accessory.getService(this.platform.Service.LockMechanism)
       || this.accessory.addService(this.platform.Service.LockMechanism, 'Door Lock', 'lock');
@@ -91,10 +76,10 @@ export class Intercom2NAccessory {
       'Door Lock',
     );
 
-    // Link lock to doorbell
-    this.doorbellService.addLinkedService(this.lockService);
+    this.platform.log.info('[Accessory] Lock service created');
 
-    this.platform.log.info('[Accessory] Lock service created and linked to doorbell');
+    // Set up DoorbellController (handles doorbell service + camera streaming)
+    this.setupDoorbellController();
 
     // Register handlers for Lock characteristics
     this.lockService.getCharacteristic(this.platform.Characteristic.LockCurrentState)
@@ -109,13 +94,14 @@ export class Intercom2NAccessory {
   }
 
   /**
-   * Set up camera streaming with CameraController
+   * Set up DoorbellController with camera streaming
+   * DoorbellController handles the doorbell service automatically and provides ringDoorbell() method
    */
-  private setupCamera(): void {
+  private setupDoorbellController(): void {
     const context = this.accessory.context;
 
     try {
-      this.platform.log.info('[Accessory] Setting up camera...');
+      this.platform.log.info('[Accessory] Setting up DoorbellController...');
 
       // Determine RTSP URL
       const rtspUrl = context.rtspUrl || this.client.getRtspUrl();
@@ -130,8 +116,8 @@ export class Intercom2NAccessory {
         context.videoCodec || 'libx264',
       );
 
-      // Configure the camera streaming delegate
-      const cameraController = new this.platform.api.hap.CameraController({
+      // Configure the DoorbellController (extends CameraController with doorbell functionality)
+      this.doorbellController = new this.platform.api.hap.DoorbellController({
         cameraStreamCount: 2,
         delegate: this.cameraSource,
         streamingOptions: {
@@ -175,10 +161,18 @@ export class Intercom2NAccessory {
         },
       });
 
-      this.accessory.configureController(cameraController);
-      this.platform.log.info('[Accessory] Camera configured successfully');
+      this.accessory.configureController(this.doorbellController);
+      this.platform.log.info('[Accessory] DoorbellController configured successfully');
+
+      // Link the lock service to the doorbell service created by the controller
+      // The DoorbellController creates a Doorbell service on the accessory
+      const doorbellService = this.accessory.getService(this.platform.Service.Doorbell);
+      if (doorbellService) {
+        doorbellService.addLinkedService(this.lockService);
+        this.platform.log.info('[Accessory] Lock service linked to doorbell');
+      }
     } catch (err) {
-      this.platform.log.error('[Accessory] Failed to set up camera: %s', (err as Error).message);
+      this.platform.log.error('[Accessory] Failed to set up DoorbellController: %s', (err as Error).message);
     }
   }
 
@@ -312,11 +306,12 @@ export class Intercom2NAccessory {
   private triggerDoorbell(): void {
     this.platform.log.info('[Accessory] Triggering doorbell notification');
 
-    // Update the ProgrammableSwitchEvent characteristic on the doorbell service
-    this.doorbellService.updateCharacteristic(
-      this.platform.Characteristic.ProgrammableSwitchEvent,
-      this.platform.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS,
-    );
+    // Use DoorbellController's ringDoorbell() method
+    if (this.doorbellController) {
+      this.doorbellController.ringDoorbell();
+    } else {
+      this.platform.log.warn('[Accessory] DoorbellController not available, cannot ring doorbell');
+    }
   }
 
   /**

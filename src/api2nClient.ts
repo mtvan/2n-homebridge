@@ -305,7 +305,7 @@ export class Api2NClient extends EventEmitter {
         }
       }
 
-      this.log.info('[Api2NClient] Response status: %d', response.statusCode);
+      this.log.debug('[Api2NClient] Response status: %d', response.statusCode);
       this.log.debug('[Api2NClient] Response body: %s', (response.data as string).substring(0, 500));
 
       if (response.statusCode === 401) {
