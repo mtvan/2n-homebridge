@@ -9,6 +9,7 @@ import { Api2NClient } from './api2nClient';
 import { CameraSource } from './cameraSource';
 import {
   DEFAULT_PORT,
+  DEFAULT_HTTPS_PORT,
   DEFAULT_SWITCH_ID,
   EVENT_POLL_INTERVAL,
   STATE_POLL_INTERVAL,
@@ -43,16 +44,20 @@ export class Intercom2NAccessory {
     this.lockCurrentState = this.platform.Characteristic.LockCurrentState.SECURED;
     this.lockTargetState = this.platform.Characteristic.LockTargetState.SECURED;
 
+    // Determine the correct port - use HTTPS port (443) by default when useHttps is enabled
+    const useHttps = context.useHttps || false;
+    const port = context.port || (useHttps ? DEFAULT_HTTPS_PORT : DEFAULT_PORT);
+
     this.platform.log.info('[Accessory] Initializing 2N Intercom accessory');
-    this.platform.log.info('[Accessory] Host: %s, Port: %d', context.host, context.port || DEFAULT_PORT);
+    this.platform.log.info('[Accessory] Host: %s, Port: %d, HTTPS: %s', context.host, port, useHttps);
 
     // Initialize the API client
     this.client = new Api2NClient(
       context.host,
-      context.port || DEFAULT_PORT,
+      port,
       context.username,
       context.password,
-      context.useHttps || false,
+      useHttps,
       this.platform.log,
     );
 

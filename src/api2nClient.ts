@@ -1,5 +1,6 @@
 import * as http from 'http';
 import * as https from 'https';
+import * as crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { Logger } from 'homebridge';
 import {
@@ -13,6 +14,14 @@ import {
   SwitchAction,
 } from './settings';
 
+interface DigestChallenge {
+  realm: string;
+  nonce: string;
+  qop?: string;
+  opaque?: string;
+  algorithm?: string;
+}
+
 /**
  * HTTP API client for communicating with 2N IP intercoms.
  */
@@ -25,6 +34,8 @@ export class Api2NClient extends EventEmitter {
   private log: Logger;
   private subscriptionId: string | null = null;
   private httpsAgent: https.Agent | null = null;
+  private nonceCount: number = 0;
+  private lastDigestChallenge: DigestChallenge | null = null;
 
   constructor(
     host: string,
@@ -53,7 +64,134 @@ export class Api2NClient extends EventEmitter {
   }
 
   /**
-   * Make an HTTP request to the 2N API
+   * Parse WWW-Authenticate header for Digest auth
+   */
+  private parseDigestChallenge(header: string): DigestChallenge | null {
+    if (!header.toLowerCase().startsWith('digest ')) {
+      return null;
+    }
+
+    const challenge: Partial<DigestChallenge> = {};
+    const params = header.substring(7);
+
+    // Parse key="value" pairs
+    const regex = /(\w+)=(?:"([^"]+)"|([^\s,]+))/g;
+    let match;
+    while ((match = regex.exec(params)) !== null) {
+      const key = match[1].toLowerCase();
+      const value = match[2] || match[3];
+      if (key === 'realm') {
+        challenge.realm = value;
+      } else if (key === 'nonce') {
+        challenge.nonce = value;
+      } else if (key === 'qop') {
+        challenge.qop = value;
+      } else if (key === 'opaque') {
+        challenge.opaque = value;
+      } else if (key === 'algorithm') {
+        challenge.algorithm = value;
+      }
+    }
+
+    if (challenge.realm && challenge.nonce) {
+      return challenge as DigestChallenge;
+    }
+    return null;
+  }
+
+  /**
+   * Generate Digest Authorization header
+   */
+  private generateDigestAuth(method: string, uri: string, challenge: DigestChallenge): string {
+    const algorithm = challenge.algorithm || 'MD5';
+    this.nonceCount++;
+    const nc = this.nonceCount.toString(16).padStart(8, '0');
+    const cnonce = crypto.randomBytes(8).toString('hex');
+
+    // HA1 = MD5(username:realm:password)
+    const ha1 = crypto.createHash('md5')
+      .update(`${this.username}:${challenge.realm}:${this.password}`)
+      .digest('hex');
+
+    // HA2 = MD5(method:uri)
+    const ha2 = crypto.createHash('md5')
+      .update(`${method}:${uri}`)
+      .digest('hex');
+
+    let response: string;
+    if (challenge.qop) {
+      // response = MD5(HA1:nonce:nc:cnonce:qop:HA2)
+      response = crypto.createHash('md5')
+        .update(`${ha1}:${challenge.nonce}:${nc}:${cnonce}:auth:${ha2}`)
+        .digest('hex');
+    } else {
+      // response = MD5(HA1:nonce:HA2)
+      response = crypto.createHash('md5')
+        .update(`${ha1}:${challenge.nonce}:${ha2}`)
+        .digest('hex');
+    }
+
+    let authHeader = `Digest username="${this.username}", realm="${challenge.realm}", ` +
+      `nonce="${challenge.nonce}", uri="${uri}", response="${response}"`;
+
+    if (challenge.qop) {
+      authHeader += `, qop=auth, nc=${nc}, cnonce="${cnonce}"`;
+    }
+    if (challenge.opaque) {
+      authHeader += `, opaque="${challenge.opaque}"`;
+    }
+    if (algorithm !== 'MD5') {
+      authHeader += `, algorithm=${algorithm}`;
+    }
+
+    return authHeader;
+  }
+
+  /**
+   * Make a single HTTP request
+   */
+  private makeRequest(
+    options: http.RequestOptions,
+    isJsonResponse: boolean = true,
+  ): Promise<{ statusCode: number; headers: http.IncomingHttpHeaders; data: string | Buffer }> {
+    return new Promise((resolve, reject) => {
+      const requestOptions: http.RequestOptions | https.RequestOptions = this.useHttps
+        ? { ...options, agent: this.httpsAgent! }
+        : options;
+      const client = this.useHttps ? https : http;
+
+      const req = client.request(requestOptions, (res) => {
+        const chunks: Buffer[] = [];
+
+        res.on('data', (chunk: Buffer) => {
+          chunks.push(chunk);
+        });
+
+        res.on('end', () => {
+          const buffer = Buffer.concat(chunks);
+          resolve({
+            statusCode: res.statusCode || 0,
+            headers: res.headers,
+            data: isJsonResponse ? buffer.toString() : buffer,
+          });
+        });
+      });
+
+      req.on('error', (err) => {
+        reject(err);
+      });
+
+      req.setTimeout(10000, () => {
+        req.destroy();
+        reject(new Error('Request timeout'));
+      });
+
+      req.end();
+    });
+  }
+
+  /**
+   * Make an HTTP request to the 2N API with Digest auth support
    */
   private async request<T>(
     endpoint: string,
@@ -66,74 +204,79 @@ export class Api2NClient extends EventEmitter {
       url.searchParams.append(key, String(value));
     });
 
-    const auth = Buffer.from(`${this.username}:${this.password}`).toString('base64');
+    const path = url.pathname + url.search;
+
+    // Try with cached digest challenge first, or basic auth
+    let authHeader: string;
+    if (this.lastDigestChallenge) {
+      authHeader = this.generateDigestAuth('GET', path, this.lastDigestChallenge);
+    } else {
+      authHeader = `Basic ${Buffer.from(`${this.username}:${this.password}`).toString('base64')}`;
+    }
 
     const options: http.RequestOptions = {
       hostname: this.host,
       port: this.port,
-      path: url.pathname + url.search,
+      path: path,
       method: 'GET',
       headers: {
-        'Authorization': `Basic ${auth}`,
+        'Authorization': authHeader,
         'Accept': 'application/json',
       },
     };
 
     this.log.debug('[Api2NClient] Request: %s %s', options.method, options.path);
 
-    return new Promise((resolve, reject) => {
-      // Use https agent for self-signed certs
-      const requestOptions: http.RequestOptions | https.RequestOptions = this.useHttps
-        ? { ...options, agent: this.httpsAgent! }
-        : options;
-      const client = this.useHttps ? https : http;
+    try {
+      let response = await this.makeRequest(options);
 
-      const req = client.request(requestOptions, (res) => {
-        let data = '';
+      // If we get 401 with WWW-Authenticate, try Digest auth
+      if (response.statusCode === 401 && response.headers['www-authenticate']) {
+        const wwwAuth = response.headers['www-authenticate'];
+        this.log.debug('[Api2NClient] Got 401, WWW-Authenticate: %s', wwwAuth);
 
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
+        const challenge = this.parseDigestChallenge(wwwAuth as string);
+        if (challenge) {
+          this.log.debug('[Api2NClient] Using Digest authentication');
+          this.lastDigestChallenge = challenge;
+          this.nonceCount = 0;
 
-        res.on('end', () => {
-          this.log.info('[Api2NClient] Response status: %d', res.statusCode);
-          this.log.info('[Api2NClient] Response body: %s', data.substring(0, 500));
+          // Retry with Digest auth
+          options.headers = {
+            ...options.headers,
+            'Authorization': this.generateDigestAuth('GET', path, challenge),
+          };
+          response = await this.makeRequest(options);
+        } else {
+          throw new Error('Authentication failed - unsupported auth method');
+        }
+      }
 
-          if (res.statusCode === 401) {
-            reject(new Error('Authentication failed - check username/password'));
-            return;
-          }
+      this.log.info('[Api2NClient] Response status: %d', response.statusCode);
+      this.log.debug('[Api2NClient] Response body: %s', (response.data as string).substring(0, 500));
 
-          if (res.statusCode !== 200) {
-            reject(new Error(`HTTP error: ${res.statusCode} - ${data.substring(0, 200)}`));
-            return;
-          }
+      if (response.statusCode === 401) {
+        throw new Error('Authentication failed - check username/password');
+      }
 
-          try {
-            const response = JSON.parse(data) as ApiResponse<T>;
-            if (!response.success) {
-              this.log.warn('[Api2NClient] API returned success=false: %j', response);
-            }
-            resolve(response);
-          } catch (err) {
-            this.log.error('[Api2NClient] Failed to parse JSON: %s', data.substring(0, 500));
-            reject(new Error(`Failed to parse response: ${err}`));
-          }
-        });
-      });
+      if (response.statusCode !== 200) {
+        throw new Error(`HTTP error: ${response.statusCode} - ${(response.data as string).substring(0, 200)}`);
+      }
 
-      req.on('error', (err) => {
-        this.log.error('[Api2NClient] Request error: %s', err.message);
-        reject(err);
-      });
-
-      req.setTimeout(10000, () => {
-        req.destroy();
-        reject(new Error('Request timeout'));
-      });
-
-      req.end();
-    });
+      try {
+        const apiResponse = JSON.parse(response.data as string) as ApiResponse<T>;
+        if (!apiResponse.success) {
+          this.log.warn('[Api2NClient] API returned success=false: %j', apiResponse);
+        }
+        return apiResponse;
+      } catch (err) {
+        this.log.error('[Api2NClient] Failed to parse JSON: %s', (response.data as string).substring(0, 500));
+        throw new Error(`Failed to parse response: ${err}`);
+      }
+    } catch (err) {
+      this.log.error('[Api2NClient] Request error: %s', (err as Error).message);
+      throw err;
+    }
   }
 
   /**
@@ -294,56 +437,55 @@ export class Api2NClient extends EventEmitter {
     url.searchParams.append('width', String(width));
     url.searchParams.append('height', String(height));
 
-    const auth = Buffer.from(`${this.username}:${this.password}`).toString('base64');
+    const path = url.pathname + url.search;
+
+    // Use cached digest challenge or basic auth
+    let authHeader: string;
+    if (this.lastDigestChallenge) {
+      authHeader = this.generateDigestAuth('GET', path, this.lastDigestChallenge);
+    } else {
+      authHeader = `Basic ${Buffer.from(`${this.username}:${this.password}`).toString('base64')}`;
+    }
 
     const options: http.RequestOptions = {
       hostname: this.host,
       port: this.port,
-      path: url.pathname + url.search,
+      path: path,
       method: 'GET',
       headers: {
-        'Authorization': `Basic ${auth}`,
+        'Authorization': authHeader,
       },
     };
 
-    return new Promise((resolve, reject) => {
-      // Use https agent for self-signed certs
-      const requestOptions: http.RequestOptions | https.RequestOptions = this.useHttps
-        ? { ...options, agent: this.httpsAgent! }
-        : options;
-      const client = this.useHttps ? https : http;
+    try {
+      let response = await this.makeRequest(options, false);
 
-      const req = client.request(requestOptions, (res) => {
-        const chunks: Buffer[] = [];
+      // If we get 401 with WWW-Authenticate, try Digest auth
+      if (response.statusCode === 401 && response.headers['www-authenticate']) {
+        const challenge = this.parseDigestChallenge(response.headers['www-authenticate'] as string);
+        if (challenge) {
+          this.lastDigestChallenge = challenge;
+          this.nonceCount = 0;
 
-        res.on('data', (chunk: Buffer) => {
-          chunks.push(chunk);
-        });
+          options.headers = {
+            ...options.headers,
+            'Authorization': this.generateDigestAuth('GET', path, challenge),
+          };
+          response = await this.makeRequest(options, false);
+        }
+      }
 
-        res.on('end', () => {
-          if (res.statusCode !== 200) {
-            reject(new Error(`Failed to get snapshot: HTTP ${res.statusCode}`));
-            return;
-          }
+      if (response.statusCode !== 200) {
+        throw new Error(`Failed to get snapshot: HTTP ${response.statusCode}`);
+      }
 
-          const buffer = Buffer.concat(chunks);
-          this.log.debug('[Api2NClient] Received snapshot: %d bytes', buffer.length);
-          resolve(buffer);
-        });
-      });
-
-      req.on('error', (err) => {
-        this.log.error('[Api2NClient] Snapshot error: %s', err.message);
-        reject(err);
-      });
-
-      req.setTimeout(10000, () => {
-        req.destroy();
-        reject(new Error('Snapshot request timeout'));
-      });
-
-      req.end();
-    });
+      const buffer = response.data as Buffer;
+      this.log.debug('[Api2NClient] Received snapshot: %d bytes', buffer.length);
+      return buffer;
+    } catch (err) {
+      this.log.error('[Api2NClient] Snapshot error: %s', (err as Error).message);
+      throw err;
+    }
   }
 
   /**

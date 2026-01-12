@@ -14,6 +14,11 @@ export const PLUGIN_NAME = 'homebridge-2n-ip-force';
 export const DEFAULT_PORT = 80;
 
 /**
+ * Default HTTPS port for 2N API
+ */
+export const DEFAULT_HTTPS_PORT = 443;
+
+/**
  * Default switch ID for door lock
  */
 export const DEFAULT_SWITCH_ID = 1;
