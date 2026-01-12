@@ -1,0 +1,127 @@
+{
+  "pluginAlias": "2NIntercom",
+  "pluginType": "platform",
+  "singular": true,
+  "headerDisplay": "Homebridge plugin for 2N IP intercoms. Control doorbell notifications, door lock, and camera via HomeKit.",
+  "footerDisplay": "For help, visit [GitHub](https://github.com/mtvan/2n-homebridge)",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string",
+        "default": "2N Intercom",
+        "required": true,
+        "description": "The name that will appear in HomeKit"
+      },
+      "host": {
+        "title": "IP Address",
+        "type": "string",
+        "required": true,
+        "format": "ipv4",
+        "placeholder": "192.168.1.100",
+        "description": "The IP address of your 2N intercom"
+      },
+      "port": {
+        "title": "HTTP Port",
+        "type": "integer",
+        "default": 80,
+        "minimum": 1,
+        "maximum": 65535,
+        "description": "HTTP port for API access (default: 80)"
+      },
+      "username": {
+        "title": "Username",
+        "type": "string",
+        "required": true,
+        "description": "HTTP API username configured on your 2N device"
+      },
+      "password": {
+        "title": "Password",
+        "type": "string",
+        "required": true,
+        "description": "HTTP API password"
+      },
+      "useHttps": {
+        "title": "Use HTTPS",
+        "type": "boolean",
+        "default": false,
+        "description": "Use HTTPS instead of HTTP for API calls"
+      },
+      "switchId": {
+        "title": "Switch/Relay ID",
+        "type": "integer",
+        "default": 1,
+        "minimum": 1,
+        "maximum": 4,
+        "description": "The switch/relay number connected to the door strike (default: 1)"
+      },
+      "doorbellButton": {
+        "title": "Doorbell Button",
+        "type": "string",
+        "default": "1",
+        "description": "The button key that triggers doorbell (default: 1)"
+      },
+      "rtspUrl": {
+        "title": "RTSP URL (Optional)",
+        "type": "string",
+        "placeholder": "rtsp://user:pass@192.168.1.100/mjpeg_stream",
+        "description": "Custom RTSP stream URL. Leave empty for auto-detection."
+      },
+      "videoCodec": {
+        "title": "Video Codec",
+        "type": "string",
+        "default": "libx264",
+        "oneOf": [
+          { "title": "Software (libx264)", "enum": ["libx264"] },
+          { "title": "Hardware - Raspberry Pi (h264_omx)", "enum": ["h264_omx"] },
+          { "title": "Copy (no transcode)", "enum": ["copy"] }
+        ],
+        "description": "FFmpeg video codec for transcoding"
+      }
+    },
+    "required": ["name", "host", "username", "password"]
+  },
+  "form": [
+    {
+      "type": "fieldset",
+      "title": "Device Settings",
+      "expandable": false,
+      "items": [
+        "name",
+        "host",
+        {
+          "key": "port",
+          "type": "number"
+        },
+        "username",
+        {
+          "key": "password",
+          "type": "password"
+        },
+        "useHttps"
+      ]
+    },
+    {
+      "type": "fieldset",
+      "title": "Door Lock Settings",
+      "expandable": true,
+      "items": [
+        {
+          "key": "switchId",
+          "type": "number"
+        },
+        "doorbellButton"
+      ]
+    },
+    {
+      "type": "fieldset",
+      "title": "Camera Settings",
+      "expandable": true,
+      "items": [
+        "rtspUrl",
+        "videoCodec"
+      ]
+    }
+  ]
+}
