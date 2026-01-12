@@ -24,6 +24,7 @@ export class Api2NClient extends EventEmitter {
   private useHttps: boolean;
   private log: Logger;
   private subscriptionId: string | null = null;
+  private httpsAgent: https.Agent | null = null;
 
   constructor(
     host: string,
@@ -40,6 +41,14 @@ export class Api2NClient extends EventEmitter {
     this.password = password;
     this.useHttps = useHttps;
     this.log = log;
+
+    // Create an HTTPS agent that accepts self-signed certificates
+    if (useHttps) {
+      this.httpsAgent = new https.Agent({
+        rejectUnauthorized: false,
+      });
+    }
+
     this.log.info('[Api2NClient] Initialized for %s://%s:%d', useHttps ? 'https' : 'http', host, port);
   }
 
@@ -73,9 +82,9 @@ export class Api2NClient extends EventEmitter {
     this.log.debug('[Api2NClient] Request: %s %s', options.method, options.path);
 
     return new Promise((resolve, reject) => {
-      // Use https with rejectUnauthorized: false for self-signed certs
-      const requestOptions = this.useHttps
-        ? { ...options, rejectUnauthorized: false }
+      // Use https agent for self-signed certs
+      const requestOptions: http.RequestOptions | https.RequestOptions = this.useHttps
+        ? { ...options, agent: this.httpsAgent! }
         : options;
       const client = this.useHttps ? https : http;
 
@@ -298,9 +307,9 @@ export class Api2NClient extends EventEmitter {
     };
 
     return new Promise((resolve, reject) => {
-      // Use https with rejectUnauthorized: false for self-signed certs
-      const requestOptions = this.useHttps
-        ? { ...options, rejectUnauthorized: false }
+      // Use https agent for self-signed certs
+      const requestOptions: http.RequestOptions | https.RequestOptions = this.useHttps
+        ? { ...options, agent: this.httpsAgent! }
         : options;
       const client = this.useHttps ? https : http;
 
