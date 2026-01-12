@@ -67,18 +67,20 @@ export class Api2NClient extends EventEmitter {
   }
 
   /**
-   * Discover Digest auth challenge by making an unauthenticated request
+   * Discover Digest auth challenge by making a request with invalid auth
    */
   private async discoverDigestAuth(): Promise<void> {
-    this.log.debug('[Api2NClient] Attempting to discover Digest auth...');
+    this.log.info('[Api2NClient] Attempting to discover Digest auth...');
     try {
+      // Try with invalid Basic auth to force a 401 with Digest challenge
       const options: http.RequestOptions = {
         hostname: this.host,
         port: this.port,
-        path: '/api/system/info',
+        path: '/api/switch/status',
         method: 'GET',
         headers: {
           'Accept': 'application/json',
+          'Authorization': 'Basic aW52YWxpZDppbnZhbGlk', // invalid:invalid
         },
       };
 
@@ -88,21 +90,29 @@ export class Api2NClient extends EventEmitter {
       }
 
       const response = await this.makeRequest(options);
-      this.log.debug('[Api2NClient] Digest discovery response: %d, has www-auth: %s',
-        response.statusCode, !!response.headers['www-authenticate']);
+      this.log.info('[Api2NClient] Digest discovery response: status=%d, www-auth=%s',
+        response.statusCode, response.headers['www-authenticate'] || 'none');
 
       if (response.statusCode === 401 && response.headers['www-authenticate']) {
-        const challenge = this.parseDigestChallenge(response.headers['www-authenticate'] as string);
+        const wwwAuth = response.headers['www-authenticate'] as string;
+        this.log.info('[Api2NClient] Got WWW-Authenticate: %s', wwwAuth.substring(0, 100));
+        const challenge = this.parseDigestChallenge(wwwAuth);
         if (challenge) {
           this.lastDigestChallenge = challenge;
           this.nonceCount = 0;
-          this.log.info('[Api2NClient] Discovered Digest auth challenge (realm: %s)', challenge.realm);
+          this.log.info('[Api2NClient] Discovered Digest auth (realm: %s)', challenge.realm);
+        } else {
+          this.log.warn('[Api2NClient] Failed to parse Digest challenge from: %s', wwwAuth);
         }
+      } else if (response.statusCode === 200) {
+        // Check if it's an error response that tells us auth method
+        const body = response.data as string;
+        this.log.info('[Api2NClient] Got 200, body: %s', body.substring(0, 200));
       } else {
-        this.log.debug('[Api2NClient] No 401/WWW-Authenticate received, status: %d', response.statusCode);
+        this.log.info('[Api2NClient] Unexpected response: %d', response.statusCode);
       }
     } catch (err) {
-      this.log.warn('[Api2NClient] Digest discovery failed: %s', (err as Error).message);
+      this.log.warn('[Api2NClient] Digest discovery error: %s', (err as Error).message);
     }
   }
 
