@@ -65,6 +65,7 @@ export class Intercom2NPlatform implements DynamicPlatformPlugin {
 
   /**
    * Called when Homebridge restores cached accessories from disk
+   * For external/unbridged accessories, we need to unregister old cached ones
    */
   configureAccessory(accessory: PlatformAccessory): void {
     this.log.info('[Platform] Loading cached accessory: %s (UUID: %s)', accessory.displayName, accessory.UUID);
@@ -72,7 +73,8 @@ export class Intercom2NPlatform implements DynamicPlatformPlugin {
   }
 
   /**
-   * Discover and register 2N device
+   * Discover and register 2N device as an EXTERNAL accessory
+   * External accessories are required for video doorbells to work properly in HomeKit
    */
   private discoverDevices(): void {
     this.log.info('[Platform] Discovering 2N devices...');
@@ -81,65 +83,45 @@ export class Intercom2NPlatform implements DynamicPlatformPlugin {
     const uuid = this.api.hap.uuid.generate(this.config.host);
     this.log.debug('[Platform] Generated UUID for host %s: %s', this.config.host, uuid);
 
-    // Check if accessory already exists
+    // Check if there's an old cached bridged accessory - we need to remove it
     const existingAccessory = this.accessories.find(accessory => accessory.UUID === uuid);
-    this.log.debug('[Platform] Cached accessories count: %d', this.accessories.length);
-
     if (existingAccessory) {
-      // Accessory already exists, restore it
-      this.log.info('[Platform] Found existing accessory in cache: %s', existingAccessory.displayName);
-
-      // Set category to VIDEO_DOORBELL
-      existingAccessory.category = Categories.VIDEO_DOORBELL;
-
-      // Update accessory context
-      existingAccessory.context.host = this.config.host;
-      existingAccessory.context.port = this.config.port;
-      existingAccessory.context.username = this.config.username;
-      existingAccessory.context.password = this.config.password;
-      existingAccessory.context.useHttps = this.config.useHttps;
-      existingAccessory.context.switchId = this.config.switchId;
-      existingAccessory.context.doorbellButton = this.config.doorbellButton;
-      existingAccessory.context.rtspUrl = this.config.rtspUrl;
-      existingAccessory.context.videoCodec = this.config.videoCodec;
-
-      // Create the accessory handler
-      this.log.info('[Platform] Creating accessory handler for cached accessory');
-      new Intercom2NAccessory(this, existingAccessory);
-
-      // Update the accessory in Homebridge
-      this.api.updatePlatformAccessories([existingAccessory]);
-      this.log.info('[Platform] Accessory restored successfully');
-    } else {
-      // Create a new accessory
-      this.log.info('[Platform] No cached accessory found, creating new accessory: %s', this.config.name);
-
-      const accessory = new this.api.platformAccessory(
-        this.config.name || '2N Intercom',
-        uuid,
-        Categories.VIDEO_DOORBELL,
-      );
-
-      // Store context
-      accessory.context.host = this.config.host;
-      accessory.context.port = this.config.port;
-      accessory.context.username = this.config.username;
-      accessory.context.password = this.config.password;
-      accessory.context.useHttps = this.config.useHttps;
-      accessory.context.switchId = this.config.switchId;
-      accessory.context.doorbellButton = this.config.doorbellButton;
-      accessory.context.rtspUrl = this.config.rtspUrl;
-      accessory.context.videoCodec = this.config.videoCodec;
-
-      // Create the accessory handler
-      this.log.info('[Platform] Creating accessory handler for new accessory');
-      new Intercom2NAccessory(this, accessory);
-
-      // Register the accessory
-      this.log.info('[Platform] Registering new accessory with Homebridge');
-      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
-      this.log.info('[Platform] Accessory registered successfully');
+      this.log.info('[Platform] Found old cached bridged accessory, removing it...');
+      this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [existingAccessory]);
+      this.log.info('[Platform] Old bridged accessory removed');
     }
+
+    // Create the accessory as an EXTERNAL accessory (unbridged)
+    // This is required for video doorbells to show doorbell functionality in HomeKit
+    this.log.info('[Platform] Creating EXTERNAL accessory: %s', this.config.name);
+
+    const accessory = new this.api.platformAccessory(
+      this.config.name || '2N Intercom',
+      uuid,
+      Categories.VIDEO_DOORBELL,
+    );
+
+    // Store context
+    accessory.context.host = this.config.host;
+    accessory.context.port = this.config.port;
+    accessory.context.username = this.config.username;
+    accessory.context.password = this.config.password;
+    accessory.context.useHttps = this.config.useHttps;
+    accessory.context.switchId = this.config.switchId;
+    accessory.context.doorbellButton = this.config.doorbellButton;
+    accessory.context.rtspUrl = this.config.rtspUrl;
+    accessory.context.videoCodec = this.config.videoCodec;
+
+    // Create the accessory handler
+    this.log.info('[Platform] Creating accessory handler');
+    new Intercom2NAccessory(this, accessory);
+
+    // Publish as EXTERNAL accessory - this is the key!
+    // External accessories show up separately in HomeKit and properly expose video doorbell
+    this.log.info('[Platform] Publishing as EXTERNAL accessory (unbridged)');
+    this.api.publishExternalAccessories(PLUGIN_NAME, [accessory]);
+    this.log.info('[Platform] External accessory published successfully');
+    this.log.info('[Platform] NOTE: You may need to add this accessory separately in Home app');
 
     this.log.info('[Platform] Device discovery complete');
   }
