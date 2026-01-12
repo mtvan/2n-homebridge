@@ -444,11 +444,11 @@ export class Api2NClient extends EventEmitter {
   async subscribeToEvents(): Promise<string> {
     this.log.info('[Api2NClient] Subscribing to events...');
 
+    // Try subscribing to all events first (no filter)
+    // If that fails, the error will be handled
     const response = await this.request<SubscriptionResponse>(
       ApiEndpoints.LOG_SUBSCRIBE,
-      {
-        include: 'KeyPressed,KeyReleased,SwitchStateChanged,MotionDetected',
-      },
+      {},
     );
 
     if (!response.success || !response.result) {
