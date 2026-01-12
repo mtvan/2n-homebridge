@@ -70,6 +70,7 @@ export class Api2NClient extends EventEmitter {
    * Discover Digest auth challenge by making an unauthenticated request
    */
   private async discoverDigestAuth(): Promise<void> {
+    this.log.debug('[Api2NClient] Attempting to discover Digest auth...');
     try {
       const options: http.RequestOptions = {
         hostname: this.host,
@@ -81,18 +82,27 @@ export class Api2NClient extends EventEmitter {
         },
       };
 
+      // Add HTTPS agent if needed
+      if (this.useHttps && this.httpsAgent) {
+        (options as https.RequestOptions).agent = this.httpsAgent;
+      }
+
       const response = await this.makeRequest(options);
+      this.log.debug('[Api2NClient] Digest discovery response: %d, has www-auth: %s',
+        response.statusCode, !!response.headers['www-authenticate']);
 
       if (response.statusCode === 401 && response.headers['www-authenticate']) {
         const challenge = this.parseDigestChallenge(response.headers['www-authenticate'] as string);
         if (challenge) {
           this.lastDigestChallenge = challenge;
           this.nonceCount = 0;
-          this.log.info('[Api2NClient] Discovered Digest auth challenge');
+          this.log.info('[Api2NClient] Discovered Digest auth challenge (realm: %s)', challenge.realm);
         }
+      } else {
+        this.log.debug('[Api2NClient] No 401/WWW-Authenticate received, status: %d', response.statusCode);
       }
     } catch (err) {
-      this.log.debug('[Api2NClient] Digest discovery failed: %s', (err as Error).message);
+      this.log.warn('[Api2NClient] Digest discovery failed: %s', (err as Error).message);
     }
   }
 
@@ -302,22 +312,37 @@ export class Api2NClient extends EventEmitter {
           this.log.warn('[Api2NClient] API returned success=false: %j', apiResponse);
 
           // Error code 8 means we need Digest auth - force re-discovery
-          if (apiResponse.error?.code === 8 && !this.lastDigestChallenge) {
-            this.log.info('[Api2NClient] Error 8 detected, forcing Digest auth discovery...');
-            await this.discoverDigestAuth();
+          if (apiResponse.error?.code === 8) {
+            this.log.info('[Api2NClient] Error 8 detected, attempting Digest auth...');
+
+            // If we don't have a challenge yet, discover it
+            if (!this.lastDigestChallenge) {
+              await this.discoverDigestAuth();
+            }
+
             if (this.lastDigestChallenge) {
               // Retry with Digest auth
+              this.log.info('[Api2NClient] Retrying with Digest auth...');
               options.headers = {
                 ...options.headers,
                 'Authorization': this.generateDigestAuth('GET', path, this.lastDigestChallenge),
               };
               const retryResponse = await this.makeRequest(options);
+              this.log.debug('[Api2NClient] Digest retry response: %d', retryResponse.statusCode);
               if (retryResponse.statusCode === 200) {
                 const retryApiResponse = JSON.parse(retryResponse.data as string) as ApiResponse<T>;
+                this.log.debug('[Api2NClient] Digest retry result: success=%s', retryApiResponse.success);
                 if (retryApiResponse.success) {
                   return retryApiResponse;
                 }
+                // If still getting error 8, clear challenge and log
+                if (retryApiResponse.error?.code === 8) {
+                  this.log.error('[Api2NClient] Digest auth still failing, clearing challenge');
+                  this.lastDigestChallenge = null;
+                }
               }
+            } else {
+              this.log.warn('[Api2NClient] Could not discover Digest challenge');
             }
           }
         }
