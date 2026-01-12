@@ -6,6 +6,7 @@ import {
   PlatformConfig,
   Service,
   Characteristic,
+  Categories,
 } from 'homebridge';
 
 import { PLATFORM_NAME, PLUGIN_NAME, Platform2NConfig } from './settings';
@@ -88,6 +89,9 @@ export class Intercom2NPlatform implements DynamicPlatformPlugin {
       // Accessory already exists, restore it
       this.log.info('[Platform] Found existing accessory in cache: %s', existingAccessory.displayName);
 
+      // Set category to VIDEO_DOORBELL
+      existingAccessory.category = Categories.VIDEO_DOORBELL;
+
       // Update accessory context
       existingAccessory.context.host = this.config.host;
       existingAccessory.context.port = this.config.port;
@@ -113,6 +117,7 @@ export class Intercom2NPlatform implements DynamicPlatformPlugin {
       const accessory = new this.api.platformAccessory(
         this.config.name || '2N Intercom',
         uuid,
+        Categories.VIDEO_DOORBELL,
       );
 
       // Store context

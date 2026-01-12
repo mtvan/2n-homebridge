@@ -62,9 +62,12 @@ export class Intercom2NAccessory {
       .setCharacteristic(this.platform.Characteristic.Model, 'IP Intercom')
       .setCharacteristic(this.platform.Characteristic.SerialNumber, context.host);
 
-    // Get or create the Doorbell service
+    // Get or create the Doorbell service (this is the PRIMARY service for video doorbell)
     this.doorbellService = this.accessory.getService(this.platform.Service.Doorbell)
       || this.accessory.addService(this.platform.Service.Doorbell);
+
+    // Mark doorbell as the primary service
+    this.doorbellService.setPrimaryService(true);
 
     this.doorbellService.setCharacteristic(
       this.platform.Characteristic.Name,
@@ -73,6 +76,9 @@ export class Intercom2NAccessory {
 
     // The doorbell has a ProgrammableSwitchEvent characteristic
     // We don't need handlers - we just push events when the button is pressed
+
+    // Set up camera BEFORE lock so it's linked to doorbell properly
+    this.setupCamera();
 
     // Get or create the Lock Mechanism service
     this.lockService = this.accessory.getService(this.platform.Service.LockMechanism)
@@ -91,11 +97,8 @@ export class Intercom2NAccessory {
       .onGet(this.getLockTargetState.bind(this))
       .onSet(this.setLockTargetState.bind(this));
 
-    // Link lock to doorbell
+    // Link lock to doorbell so they appear together
     this.doorbellService.addLinkedService(this.lockService);
-
-    // Set up camera if supported
-    this.setupCamera();
 
     // Initialize connection and start polling
     this.initialize();
