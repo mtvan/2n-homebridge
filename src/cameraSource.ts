@@ -256,6 +256,12 @@ export class CameraSource implements CameraStreamingDelegate {
       '-hide_banner',
       '-loglevel', 'warning',
 
+      // Low-latency input options - reduces startup time significantly
+      '-fflags', 'nobuffer',
+      '-flags', 'low_delay',
+      '-probesize', '32',
+      '-analyzeduration', '0',
+
       // Input
       '-rtsp_transport', 'tcp',
       '-i', this.rtspUrl,
@@ -265,7 +271,6 @@ export class CameraSource implements CameraStreamingDelegate {
       '-vcodec', this.videoCodec,
       '-pix_fmt', 'yuv420p',
       '-r', String(fps),
-      '-f', 'rawvideo',
     ];
 
     // Add video codec specific options
@@ -278,11 +283,12 @@ export class CameraSource implements CameraStreamingDelegate {
       );
     }
 
-    // Video bitrate and size
+    // Video bitrate and size - smaller buffer for faster startup
     args.push(
       '-b:v', `${videoBitrate}k`,
-      '-bufsize', `${videoBitrate * 2}k`,
+      '-bufsize', `${videoBitrate}k`,
       '-maxrate', `${videoBitrate}k`,
+      '-g', String(fps * 2), // Keyframe every 2 seconds for faster seeking
       '-vf', `scale=${width}:${height}`,
     );
 
