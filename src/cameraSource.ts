@@ -262,8 +262,8 @@ export class CameraSource implements CameraStreamingDelegate {
       '-probesize', '16000',
       '-analyzeduration', '500000',
 
-      // Input
-      '-rtsp_transport', 'tcp',
+      // Input - UDP is faster than TCP for RTSP
+      '-rtsp_transport', 'udp',
       '-i', this.rtspUrl,
 
       // Select only the first video stream (skip audio/other streams)
