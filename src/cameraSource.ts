@@ -256,11 +256,11 @@ export class CameraSource implements CameraStreamingDelegate {
       '-hide_banner',
       '-loglevel', 'warning',
 
-      // Low-latency input options - reduces startup time significantly
+      // Low-latency input options - reduces startup time
       '-fflags', 'nobuffer',
       '-flags', 'low_delay',
-      '-probesize', '32',
-      '-analyzeduration', '0',
+      '-probesize', '32000',
+      '-analyzeduration', '1000000',
 
       // Input
       '-rtsp_transport', 'tcp',
