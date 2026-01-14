@@ -269,7 +269,9 @@ export class Intercom2NAccessory {
     switch (event.event) {
       case EventTypes.KEY_PRESSED:
         // Check if it's the doorbell button
-        if (String(event.params.key) === doorbellButton) {
+        // 2N sends key as "%1", "%2" etc - strip the % prefix for comparison
+        const keyValue = String(event.params.key).replace('%', '');
+        if (keyValue === doorbellButton) {
           this.platform.log.info('[Accessory] Doorbell button pressed!');
           this.triggerDoorbell();
         } else {
