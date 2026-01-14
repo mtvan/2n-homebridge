@@ -202,8 +202,10 @@ export class CameraSource implements CameraStreamingDelegate {
 
     this.platform.log.debug('[Camera] FFmpeg args: %s', ffmpegArgs.join(' '));
 
-    // Spawn ffmpeg process
-    const ffmpegProcess = spawn('ffmpeg', ffmpegArgs, {
+    // Spawn ffmpeg process - use full path for Homebridge compatibility
+    const ffmpegPath = process.env.FFMPEG_PATH || '/opt/homebrew/bin/ffmpeg';
+    this.platform.log.debug('[Camera] Using FFmpeg at: %s', ffmpegPath);
+    const ffmpegProcess = spawn(ffmpegPath, ffmpegArgs, {
       env: process.env,
     });
 
