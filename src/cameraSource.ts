@@ -256,11 +256,13 @@ export class CameraSource implements CameraStreamingDelegate {
       '-hide_banner',
       '-loglevel', 'warning',
 
-      // Low-latency input options - reduces startup time
-      '-fflags', 'nobuffer+genpts',
+      // Aggressive low-latency input options
+      '-fflags', 'nobuffer+genpts+discardcorrupt',
       '-flags', 'low_delay',
-      '-probesize', '16000',
-      '-analyzeduration', '500000',
+      '-probesize', '8000',
+      '-analyzeduration', '100000',
+      '-max_delay', '0',
+      '-reorder_queue_size', '0',
 
       // Input - UDP is faster than TCP for RTSP
       '-rtsp_transport', 'udp',
