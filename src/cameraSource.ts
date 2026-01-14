@@ -79,11 +79,11 @@ export class CameraSource implements CameraStreamingDelegate {
     request: SnapshotRequest,
     callback: SnapshotRequestCallback,
   ): Promise<void> {
-    this.platform.log.debug('[Camera] Snapshot requested: %dx%d', request.width, request.height);
+    this.platform.log.info('[Camera] Snapshot requested: %dx%d', request.width, request.height);
 
     try {
       const snapshot = await this.client.getSnapshot(request.width, request.height);
-      this.platform.log.debug('[Camera] Snapshot received: %d bytes', snapshot.length);
+      this.platform.log.info('[Camera] Snapshot received: %d bytes', snapshot.length);
       callback(undefined, snapshot);
     } catch (err) {
       this.platform.log.error('[Camera] Snapshot error: %s', (err as Error).message);

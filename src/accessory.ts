@@ -337,20 +337,20 @@ export class Intercom2NAccessory {
 
   /**
    * Trigger a doorbell press event in HomeKit
+   * Uses setValue() approach like homebridge-videodoorbell for rich notifications
    */
   private triggerDoorbell(): void {
     this.platform.log.info('[Accessory] Triggering doorbell notification');
 
-    // Get the Doorbell service and update characteristic directly
-    // This is more reliable than using doorbellController.ringDoorbell()
+    // Get the Doorbell service and trigger using setValue()
+    // This approach is used by homebridge-videodoorbell for rich notifications
     const doorbellService = this.accessory.getService(this.platform.Service.Doorbell);
 
     if (doorbellService) {
-      doorbellService.updateCharacteristic(
-        this.platform.Characteristic.ProgrammableSwitchEvent,
-        this.platform.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS,
-      );
-      this.platform.log.info('[Accessory] Doorbell SINGLE_PRESS sent to HomeKit');
+      // Use setValue() like homebridge-videodoorbell does
+      doorbellService.getCharacteristic(this.platform.Characteristic.ProgrammableSwitchEvent)
+        .setValue(this.platform.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS);
+      this.platform.log.info('[Accessory] Doorbell SINGLE_PRESS sent via setValue()');
     } else {
       this.platform.log.warn('[Accessory] Doorbell service not found');
     }
