@@ -33,6 +33,7 @@ export class Intercom2NAccessory {
   private lockTargetState: number;
   private eventPollInterval: NodeJS.Timeout | null = null;
   private statePollInterval: NodeJS.Timeout | null = null;
+  private isPollingEvents: boolean = false;
 
   constructor(
     private readonly platform: Intercom2NPlatform,
@@ -237,6 +238,12 @@ export class Intercom2NAccessory {
    * Poll for events
    */
   private async pollEvents(): Promise<void> {
+    // Prevent concurrent poll requests - 2N API only allows one at a time
+    if (this.isPollingEvents) {
+      return;
+    }
+
+    this.isPollingEvents = true;
     try {
       const events = await this.client.pullEvents(1);
 
@@ -254,6 +261,8 @@ export class Intercom2NAccessory {
           this.platform.log.error('[Accessory] Failed to re-subscribe: %s', (subErr as Error).message);
         }
       }
+    } finally {
+      this.isPollingEvents = false;
     }
   }
 
