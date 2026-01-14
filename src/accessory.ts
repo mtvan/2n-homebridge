@@ -68,6 +68,9 @@ export class Intercom2NAccessory {
       .setCharacteristic(this.platform.Characteristic.Model, 'IP Intercom')
       .setCharacteristic(this.platform.Characteristic.SerialNumber, context.host);
 
+    // Set up DoorbellController FIRST (must be primary service for rich notifications)
+    this.setupDoorbellController();
+
     // Get or create the Lock Mechanism service with subtype
     this.lockService = this.accessory.getService(this.platform.Service.LockMechanism)
       || this.accessory.addService(this.platform.Service.LockMechanism, 'Door Lock', 'lock');
@@ -79,8 +82,8 @@ export class Intercom2NAccessory {
 
     this.platform.log.info('[Accessory] Lock service created');
 
-    // Set up DoorbellController (handles doorbell service + camera streaming)
-    this.setupDoorbellController();
+    // Link doorbell and lock services together
+    this.linkServices();
 
     // Register handlers for Lock characteristics
     this.lockService.getCharacteristic(this.platform.Characteristic.LockCurrentState)
@@ -165,15 +168,25 @@ export class Intercom2NAccessory {
       this.accessory.configureController(this.doorbellController);
       this.platform.log.info('[Accessory] DoorbellController configured successfully');
 
-      // Link the lock service to the doorbell service created by the controller
-      // The DoorbellController creates a Doorbell service on the accessory
+      // Mark the Doorbell service as the primary service for rich notifications
       const doorbellService = this.accessory.getService(this.platform.Service.Doorbell);
       if (doorbellService) {
-        doorbellService.addLinkedService(this.lockService);
-        this.platform.log.info('[Accessory] Lock service linked to doorbell');
+        doorbellService.setPrimaryService(true);
+        this.platform.log.info('[Accessory] Doorbell service set as PRIMARY');
       }
     } catch (err) {
       this.platform.log.error('[Accessory] Failed to set up DoorbellController: %s', (err as Error).message);
+    }
+  }
+
+  /**
+   * Link services together after all are created
+   */
+  private linkServices(): void {
+    const doorbellService = this.accessory.getService(this.platform.Service.Doorbell);
+    if (doorbellService && this.lockService) {
+      doorbellService.addLinkedService(this.lockService);
+      this.platform.log.info('[Accessory] Lock service linked to doorbell');
     }
   }
 
