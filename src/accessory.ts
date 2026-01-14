@@ -261,7 +261,8 @@ export class Intercom2NAccessory {
    * Handle an event from the 2N device
    */
   private handleEvent(event: LogEvent): void {
-    this.platform.log.debug('[Accessory] Event: %s - %j', event.event, event.params);
+    // Log ALL events at info level for diagnosis
+    this.platform.log.info('[Accessory] Event received: %s - %j', event.event, event.params);
 
     const doorbellButton = this.accessory.context.doorbellButton || '1';
 
@@ -295,8 +296,31 @@ export class Intercom2NAccessory {
         // Could trigger doorbell or motion sensor here
         break;
 
+      case EventTypes.INPUT_CHANGED:
+        // Some 2N devices use input changes for doorbell button
+        this.platform.log.info('[Accessory] Input changed: port=%s, state=%s',
+          event.params.port, event.params.state);
+        // Trigger doorbell if input goes active (state true or 1)
+        if (event.params.state === true || event.params.state === 'true' ||
+            event.params.state === 1 || event.params.state === '1') {
+          this.platform.log.info('[Accessory] Input triggered doorbell!');
+          this.triggerDoorbell();
+        }
+        break;
+
+      case EventTypes.CALL_STATE_CHANGED:
+        // Trigger doorbell when call is initiated from the intercom
+        this.platform.log.info('[Accessory] Call state changed: state=%s, direction=%s',
+          event.params.state, event.params.direction);
+        if (event.params.state === 'ringing' || event.params.state === 'connecting' ||
+            event.params.direction === 'outgoing') {
+          this.platform.log.info('[Accessory] Call initiated - triggering doorbell!');
+          this.triggerDoorbell();
+        }
+        break;
+
       default:
-        this.platform.log.debug('[Accessory] Unhandled event: %s', event.event);
+        this.platform.log.info('[Accessory] Unhandled event type: %s', event.event);
     }
   }
 
@@ -306,11 +330,24 @@ export class Intercom2NAccessory {
   private triggerDoorbell(): void {
     this.platform.log.info('[Accessory] Triggering doorbell notification');
 
-    // Use DoorbellController's ringDoorbell() method
+    // Get the Doorbell service and update characteristic directly
+    // This is more reliable than using doorbellController.ringDoorbell()
+    const doorbellService = this.accessory.getService(this.platform.Service.Doorbell);
+
+    if (doorbellService) {
+      doorbellService.updateCharacteristic(
+        this.platform.Characteristic.ProgrammableSwitchEvent,
+        this.platform.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS,
+      );
+      this.platform.log.info('[Accessory] Doorbell SINGLE_PRESS sent to HomeKit');
+    } else {
+      this.platform.log.warn('[Accessory] Doorbell service not found');
+    }
+
+    // Also call ringDoorbell() as backup
     if (this.doorbellController) {
       this.doorbellController.ringDoorbell();
-    } else {
-      this.platform.log.warn('[Accessory] DoorbellController not available, cannot ring doorbell');
+      this.platform.log.info('[Accessory] DoorbellController.ringDoorbell() called');
     }
   }
 
