@@ -261,7 +261,6 @@ export class CameraSource implements CameraStreamingDelegate {
       '-flags', 'low_delay',
       '-probesize', '16000',
       '-analyzeduration', '500000',
-      '-stimeout', '5000000', // 5s RTSP timeout
 
       // Input
       '-rtsp_transport', 'tcp',
