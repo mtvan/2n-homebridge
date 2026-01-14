@@ -257,23 +257,34 @@ export class CameraSource implements CameraStreamingDelegate {
       '-loglevel', 'warning',
 
       // Low-latency input options - reduces startup time
-      '-fflags', 'nobuffer',
+      '-fflags', 'nobuffer+genpts',
       '-flags', 'low_delay',
-      '-probesize', '32000',
-      '-analyzeduration', '1000000',
+      '-probesize', '16000',
+      '-analyzeduration', '500000',
+      '-stimeout', '5000000', // 5s RTSP timeout
 
       // Input
       '-rtsp_transport', 'tcp',
       '-i', this.rtspUrl,
 
-      // Video output
+      // Select only the first video stream (skip audio/other streams)
+      '-map', '0:v:0',
       '-an', // No audio for now
-      '-vcodec', this.videoCodec,
-      '-pix_fmt', 'yuv420p',
-      '-r', String(fps),
     ];
 
-    // Add video codec specific options
+    // Use copy codec if configured (fastest - no transcoding)
+    // Otherwise transcode with libx264
+    if (this.videoCodec === 'copy') {
+      args.push('-vcodec', 'copy');
+    } else {
+      args.push(
+        '-vcodec', this.videoCodec,
+        '-pix_fmt', 'yuv420p',
+        '-r', String(fps),
+      );
+    }
+
+    // Add video codec specific options (only when transcoding)
     if (this.videoCodec === 'libx264') {
       args.push(
         '-preset', 'ultrafast',
@@ -283,14 +294,16 @@ export class CameraSource implements CameraStreamingDelegate {
       );
     }
 
-    // Video bitrate and size - smaller buffer for faster startup
-    args.push(
-      '-b:v', `${videoBitrate}k`,
-      '-bufsize', `${videoBitrate}k`,
-      '-maxrate', `${videoBitrate}k`,
-      '-g', String(fps * 2), // Keyframe every 2 seconds for faster seeking
-      '-vf', `scale=${width}:${height}`,
-    );
+    // Video bitrate and size - only when transcoding (not copy)
+    if (this.videoCodec !== 'copy') {
+      args.push(
+        '-b:v', `${videoBitrate}k`,
+        '-bufsize', `${videoBitrate}k`,
+        '-maxrate', `${videoBitrate}k`,
+        '-g', String(fps * 2), // Keyframe every 2 seconds for faster seeking
+        '-vf', `scale=${width}:${height}`,
+      );
+    }
 
     // Output to RTP
     const videoPayloadType = 99;
